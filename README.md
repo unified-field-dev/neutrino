@@ -21,7 +21,7 @@ Crate-root rustdoc owns the Features inventory and primary-task guides. Start at
 `cargo doc -p neutrino --features ssr --open`.
 
 Operator pages (`NeutrinoRoutes` at `/secrets`) live in
-[neutrino-uf-app](https://github.com/deathbreakfast/neutrino-uf-app).
+[neutrino-uf-app](https://github.com/unified-field-dev/neutrino-uf-app).
 
 ## Getting started
 
@@ -125,7 +125,7 @@ Contribute: [`CONTRIBUTING.md`](CONTRIBUTING.md).
 ## FAQ
 
 **Is it a standalone server?** No. `neutrino` is the domain library. Mount
-`NeutrinoRoutes` from [neutrino-uf-app](https://github.com/deathbreakfast/neutrino-uf-app)
+`NeutrinoRoutes` from [neutrino-uf-app](https://github.com/unified-field-dev/neutrino-uf-app)
 in a composite host that already wires Valence, session chrome, and Higgs.
 
 **Do I need the admin UI?** No. Backend hosts can depend on `neutrino` alone and call
