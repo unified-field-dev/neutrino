@@ -2,7 +2,7 @@
 
 ## Supported versions
 
-Security fixes are accepted against the latest published `0.1.x` release line of this repository's `neutrino` crate. The Orbital admin UI (`neutrino-app`) lives in the [neutrino-uf-app](https://github.com/deathbreakfast/neutrino-uf-app) composer repo.
+Security fixes are accepted against the latest published `0.1.x` release line of this repository's `neutrino` crate. The Orbital admin UI (`neutrino-app`) lives in the [neutrino-uf-app](https://github.com/unified-field-dev/neutrino-uf-app) composer repo.
 
 ## Reporting a vulnerability
 
