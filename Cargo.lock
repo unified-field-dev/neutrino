@@ -1045,7 +1045,7 @@ dependencies = [
 [[package]]
 name = "gauge"
 version = "0.1.0"
-source = "git+https://github.com/unified-field-dev/gauge?branch=main#cad67f586e07bde75b192bb56e2c5cfa1a837980"
+source = "git+https://github.com/unified-field-dev/gauge?branch=main#576a4cd3d66c7291584f1c51d378da49839c952a"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -3908,7 +3908,7 @@ checksum = "b6f5e870be6c3b371b77fe0ee0bafb859fa4964b4404c27de1d380043c4dda20"
 [[package]]
 name = "uf-notifications-core"
 version = "0.3.0"
-source = "git+https://github.com/unified-field-dev/uf-notifications?branch=main#0e1fd0e04c217b5ea04b1a20757092b62e1b7feb"
+source = "git+https://github.com/unified-field-dev/uf-notifications?branch=main#9796dac6709c9bcae89a90547a565f5497346d68"
 dependencies = [
  "async-trait",
  "chrono",
