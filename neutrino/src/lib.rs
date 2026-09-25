@@ -15,7 +15,7 @@
 //! | Product / UI vault API | [`vault`] (feature `ssr`) |
 //! | Gauge per-secret authz | [`actor_can_secret`], [`ensure_secret_permission_bundle`] |
 //! | Gauge bootstrap + create gate | [`create_initial_neutrino_groups`], [`CREATE_NEUTRINO_SECRETS`] |
-//! | Master key env | [`key_source`] / [`MasterKeyError`] |
+//! | Master key env / KMS unwrap | [`key_source`] / [`resolve_master_key`] / [`MasterKeyError`] |
 //! | Bootstrap env classification / seed | [`bootstrap_trust`], [`bootstrap_seeder`] |
 //! | Low-level seal/unseal | [`crypto`] |
 //! | Typed failures | [`NeutrinoError`] / [`NeutrinoResult`] |
@@ -49,9 +49,13 @@
 //! - **Env secret seeder** — Copies bootstrap-classified env material into the
 //!   sealed store on first boot and emits `scoped_credentials_refs_json`.
 //!   [Get started](#bootstrap-env-seed).
-//! - **Master key resolution** — Loads `NEUTRINO_MASTER_KEY` as typed
-//!   [`MasterKeyError`]-bearing bytes before any seal or reveal.
+//! - **Master key resolution** — Loads the process master key via [`resolve_master_key`]
+//!   (`NEUTRINO_MASTER_KEY` by default, or KMS unwrap when `NEUTRINO_KEY_SOURCE` and a
+//!   `kms-*` feature are set) as typed [`MasterKeyError`]-bearing bytes before seal or reveal.
 //!   [Get started](#resolve-master-key).
+//! - **KMS master-key sources** — Optional AWS KMS, GCP KMS, or Vault Transit unwrap of a
+//!   wrapped master key (`NEUTRINO_MASTER_KEY_WRAPPED`). Customer secrets stay in Valence;
+//!   KMS only protects the process key. [Get started](#resolve-master-key).
 //! - **Secret access model** — Who can browse, reveal, edit, and delete a secret,
 //!   what Super User can always do, and which Gauge objects a new secret creates.
 //!   Read this before you store your first credential. [Get started](#secret-access-model).
@@ -392,26 +396,45 @@
 //!
 //! ## Resolve master key
 //!
-//! [`master_key_from_env`] loads `NEUTRINO_MASTER_KEY` before any seal or reveal runs.
-//! The helper accepts 32-byte hex (or a weak UTF-8 escape when explicitly allowed) and
-//! returns typed [`MasterKeyError`] when the variable is missing, empty, or malformed.
+//! [`resolve_master_key`] loads the process master key before any seal or reveal.
+//! Default source is `NEUTRINO_KEY_SOURCE=env` (or unset): 32-byte hex via
+//! `NEUTRINO_MASTER_KEY`, or a weak UTF-8 escape when explicitly allowed. With a
+//! `kms-*` Cargo feature, set `NEUTRINO_KEY_SOURCE` to `aws-kms`, `gcp-kms`, or
+//! `vault-transit` and provide `NEUTRINO_MASTER_KEY_WRAPPED` plus provider key id
+//! env vars — KMS unwraps the master key only; customer secrets remain in Valence.
 //! Resolve during process startup before constructing [`ValenceSealedStore`] or calling
-//! [`seed_bootstrap_secrets_from_env`].
+//! [`seed_bootstrap_secrets_from_env`]. [`master_key_from_env`] remains the env-only helper.
 //!
-//! **Prerequisites:** `NEUTRINO_MASTER_KEY` set in the process environment.
+//! **Prerequisites:** `NEUTRINO_MASTER_KEY` set (env source), or wrapped key + provider
+//! config when using a KMS source.
 //!
 //! ```ignore
-//! use neutrino::master_key_from_env;
+//! use neutrino::resolve_master_key;
 //!
 //! // std::env::set_var("NEUTRINO_MASTER_KEY", "<64 hex chars>");
-//! let key = master_key_from_env()?;
-//! assert!(key.len() == 32 || key.len() > 0);
-//! assert!(key.len() > 0);
+//! let key = resolve_master_key().await?;
+//! assert_eq!(key.len(), 32);
+//! ```
+//!
+//! KMS variant (`feature = "kms-aws"`): set `NEUTRINO_KEY_SOURCE=aws-kms`,
+//! `NEUTRINO_MASTER_KEY_WRAPPED` (base64 ciphertext), and `NEUTRINO_AWS_KMS_KEY_ID`, then call
+//! the same [`resolve_master_key`].
+//!
+//! ```ignore
+//! // cargo build -p neutrino --features kms-aws
+//! // std::env::set_var("NEUTRINO_KEY_SOURCE", "aws-kms");
+//! // std::env::set_var("NEUTRINO_MASTER_KEY_WRAPPED", "<base64>");
+//! // std::env::set_var("NEUTRINO_AWS_KMS_KEY_ID", "alias/neutrino");
+//! use neutrino::resolve_master_key;
+//!
+//! let key = resolve_master_key().await?;
+//! assert_eq!(key.len(), 32);
 //! ```
 //!
 //! On failure, inspect [`MasterKeyError`] variants (`NotSet`, `Empty`, `InvalidHex`,
-//! `WeakKeyRejected`). Next: [Gauge bootstrap](#gauge-bootstrap-at-boot) if not done,
-//! then [bootstrap env seed](#bootstrap-env-seed).
+//! `WeakKeyRejected`, `Config`, `Provider`, `Unavailable`, `FeatureDisabled`). Next:
+//! [Gauge bootstrap](#gauge-bootstrap-at-boot) if not done, then
+//! [bootstrap env seed](#bootstrap-env-seed).
 //!
 //! ## Feature flags
 //!
@@ -420,7 +443,9 @@
 //! | *(default)* | Crypto helpers, [`key_source`], [`bootstrap_trust`], [`secret_backend`] stubs |
 //! | `ssr` | Valence models, [`ValenceSealedStore`], [`vault`], Gauge wiring, instrumentation |
 //! | `rbac-tests` | Extra Gauge RBAC integration tests (`ssr` + lepton/gauge graph) |
-//! | `kms-aws` / `kms-gcp` / `kms-vault-transit` | Stub Cargo gates for future KMS key-source work |
+//! | `kms-aws` | AWS KMS [`KeySource`] unwrap (`AwsKmsKeySource`) |
+//! | `kms-gcp` | GCP Cloud KMS [`KeySource`] unwrap |
+//! | `kms-vault-transit` | HashiCorp Vault Transit [`KeySource`] unwrap |
 //! | `hsm-pkcs11` / `hsm-tpm` | Stub Cargo gates for future HSM key sources |
 //!
 //! ## Examples
@@ -434,7 +459,7 @@
 //!   (also `vault_authz_contract`, `vault_gauge_authz` with `rbac-tests`)
 //! - Host walkthrough: `CARGO_BUILD_JOBS=1 CARGO_TARGET_DIR=target-neutrino cargo run -p vault-host`
 //!
-//! Master key env errors use [`MasterKeyError`]. Store and vault APIs return
+//! Master key errors use [`MasterKeyError`]. Store and vault APIs return
 //! [`NeutrinoResult`]. Leptos server fns in `neutrino-app` map failures to `ServerFnError`.
 
 #![cfg_attr(docsrs, feature(doc_cfg))]
@@ -463,6 +488,8 @@ pub mod embedded_surreal;
 pub mod generated;
 #[cfg(feature = "ssr")]
 pub mod instrumentation;
+#[cfg(feature = "ssr")]
+mod master_key_meta;
 #[cfg(feature = "ssr")]
 mod privacy_policies;
 #[cfg(feature = "ssr")]
@@ -502,7 +529,10 @@ pub use bootstrap_seeder::{
 };
 pub use bootstrap_trust::{classify_env_key, SecretLifecycleClass};
 pub use error::{NeutrinoError, NeutrinoResult};
-pub use key_source::{master_key_from_env, MasterKeyError};
+pub use key_source::{
+    clear_master_key_cache, master_key_from_env, resolve_master_key, EnvKeySource, KeySource,
+    KeySourceKind, MasterKeyError, MasterKeyProvenance, ResolvedMasterKey,
+};
 #[cfg(feature = "ssr")]
 pub use scope_prefix::scope_path_matches_prefix;
 #[cfg(feature = "ssr")]

@@ -65,7 +65,7 @@ pub struct RevealedSecret {
 /// # Errors
 ///
 /// Methods return [`NeutrinoResult`]. Configuration failures from
-/// [`crate::key_source::master_key_from_env`] surface as
+/// [`crate::key_source::resolve_master_key`] surface as
 /// [`crate::NeutrinoError::Config`] before they wrap into service failures
 /// inside the sealed store.
 ///

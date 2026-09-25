@@ -64,9 +64,23 @@ Prefix filtering is not a Gauge View check — coarse `SecretsRead` still applie
 
 ## Master key
 
-`NEUTRINO_MASTER_KEY` must be 64 hex characters (256-bit) in production. Non-hex
-UTF-8 keys require explicit `NEUTRINO_ALLOW_WEAK_MASTER_KEY=1` (non-production
-only).
+By default Neutrino loads the process master key from `NEUTRINO_MASTER_KEY`
+(64 hex characters / 256-bit in production). Non-hex UTF-8 keys require
+`NEUTRINO_ALLOW_WEAK_MASTER_KEY=1` (non-production only).
+
+Optional KMS unwrap (`NEUTRINO_KEY_SOURCE=aws-kms|gcp-kms|vault-transit`) uses
+`NEUTRINO_MASTER_KEY_WRAPPED` plus provider key id / credentials. Enable the
+matching Cargo feature (`kms-aws`, `kms-gcp`, or `kms-vault-transit`). KMS
+protects the process master key only — customer secrets stay sealed in Valence.
+Grant cloud IAM (or Vault policy) Decrypt-only on that single key.
+
+| Source | Required env (beyond `NEUTRINO_KEY_SOURCE`) |
+|--------|---------------------------------------------|
+| `env` (default) | `NEUTRINO_MASTER_KEY` |
+| `aws-kms` | `NEUTRINO_MASTER_KEY_WRAPPED` (base64), `NEUTRINO_AWS_KMS_KEY_ID`; AWS default credential chain |
+| `gcp-kms` | `NEUTRINO_MASTER_KEY_WRAPPED` (base64), `NEUTRINO_GCP_KMS_KEY_NAME`, `NEUTRINO_GCP_ACCESS_TOKEN` |
+| `vault-transit` | `NEUTRINO_MASTER_KEY_WRAPPED` (Transit ciphertext), `NEUTRINO_VAULT_ADDR`, `NEUTRINO_VAULT_TOKEN`, `NEUTRINO_VAULT_TRANSIT_KEY` |
+
 
 ## Archived version reveal
 
