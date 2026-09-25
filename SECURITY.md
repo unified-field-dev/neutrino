@@ -120,7 +120,7 @@ dialog closes.
 
 ## Secret access telemetry
 
-UC3 `neutrino_secret_access_log` rows include `scope_path`, `secret_name`,
+Spectra event table `neutrino_secret_access_log` rows include `scope_path`, `secret_name`,
 `secret_id`, and `caller` as hashed fingerprints (`h` + hex), not plaintext.
 Rows never carry secret plaintext or ciphertext. Correlation uses hashed
 `secret_id`, plus `action` and `version_num`.
