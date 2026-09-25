@@ -68,11 +68,12 @@ By default Neutrino loads the process master key from `NEUTRINO_MASTER_KEY`
 (64 hex characters / 256-bit in production). Non-hex UTF-8 keys require
 `NEUTRINO_ALLOW_WEAK_MASTER_KEY=1` (non-production only).
 
-Optional KMS unwrap (`NEUTRINO_KEY_SOURCE=aws-kms|gcp-kms|vault-transit`) uses
-`NEUTRINO_MASTER_KEY_WRAPPED` plus provider key id / credentials. Enable the
-matching Cargo feature (`kms-aws`, `kms-gcp`, or `kms-vault-transit`). KMS
-protects the process master key only — customer secrets stay sealed in Valence.
-Grant cloud IAM (or Vault policy) Decrypt-only on that single key.
+Optional KMS or HSM unwrap (`NEUTRINO_KEY_SOURCE=aws-kms|gcp-kms|vault-transit|pkcs11|tpm`)
+uses `NEUTRINO_MASTER_KEY_WRAPPED` plus provider credentials / token config. Enable the
+matching Cargo feature (`kms-aws`, `kms-gcp`, `kms-vault-transit`, `hsm-pkcs11`, or
+`hsm-tpm`). The provider protects the process master key only — customer secrets stay
+sealed in Valence. Grant cloud IAM (or Vault policy) Decrypt-only on that single key;
+for PKCS#11/TPM, wrap the MEK to the token/TPM public key offline (RSA-OAEP SHA-256).
 
 | Source | Required env (beyond `NEUTRINO_KEY_SOURCE`) |
 |--------|---------------------------------------------|
@@ -80,6 +81,11 @@ Grant cloud IAM (or Vault policy) Decrypt-only on that single key.
 | `aws-kms` | `NEUTRINO_MASTER_KEY_WRAPPED` (base64), `NEUTRINO_AWS_KMS_KEY_ID`; AWS default credential chain |
 | `gcp-kms` | `NEUTRINO_MASTER_KEY_WRAPPED` (base64), `NEUTRINO_GCP_KMS_KEY_NAME`, `NEUTRINO_GCP_ACCESS_TOKEN` |
 | `vault-transit` | `NEUTRINO_MASTER_KEY_WRAPPED` (Transit ciphertext), `NEUTRINO_VAULT_ADDR`, `NEUTRINO_VAULT_TOKEN`, `NEUTRINO_VAULT_TRANSIT_KEY` |
+| `pkcs11` | `NEUTRINO_MASTER_KEY_WRAPPED` (base64), `NEUTRINO_PKCS11_MODULE`, `NEUTRINO_PKCS11_PIN`, `NEUTRINO_PKCS11_KEY_LABEL`; optional `NEUTRINO_PKCS11_SLOT`, `NEUTRINO_PKCS11_OAEP_HASH` (`sha256` default, `sha1` for SoftHSM+OpenSSL) |
+| `tpm` | `NEUTRINO_MASTER_KEY_WRAPPED` (base64), `NEUTRINO_TPM_TCTI`, `NEUTRINO_TPM_KEY_HANDLE` |
+
+Local SoftHSM / swtpm setup for gated integration tests:
+[`docs/hsm-local-setup.md`](docs/hsm-local-setup.md).
 
 
 ## Archived version reveal

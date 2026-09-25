@@ -1,8 +1,9 @@
-//! Master key material resolution (`NEUTRINO_MASTER_KEY` and optional KMS unwrap).
+//! Master key material resolution (`NEUTRINO_MASTER_KEY` and optional KMS/HSM unwrap).
 //!
-//! Default source is process env. With `kms-aws` / `kms-gcp` / `kms-vault-transit`,
-//! set `NEUTRINO_KEY_SOURCE` to unwrap a wrapped master key via the matching provider.
-//! Customer secrets stay in Valence; KMS only protects the process master key.
+//! Default source is process env. With `kms-aws` / `kms-gcp` / `kms-vault-transit` /
+//! `hsm-pkcs11` / `hsm-tpm`, set `NEUTRINO_KEY_SOURCE` to unwrap a wrapped master key
+//! via the matching provider. Customer secrets stay in Valence; KMS/HSM only protect
+//! the process master key.
 
 use std::fmt;
 use std::sync::Mutex;
@@ -39,14 +40,14 @@ pub enum MasterKeyError {
         /// Missing or invalid field name (safe to log).
         field: &'static str,
     },
-    /// KMS / Vault provider returned an application-level failure.
+    /// KMS / Vault / HSM provider returned an application-level failure.
     Provider {
-        /// Provider label (`aws-kms`, `gcp-kms`, `vault-transit`).
+        /// Provider label (`aws-kms`, `gcp-kms`, `vault-transit`, `pkcs11`, `tpm`).
         provider: &'static str,
         /// Operation label (`Decrypt`).
         operation: &'static str,
     },
-    /// Network / timeout / transport failure talking to the provider.
+    /// Network / timeout / transport / device failure talking to the provider.
     Unavailable {
         /// Provider label.
         provider: &'static str,
@@ -90,6 +91,26 @@ impl fmt::Display for MasterKeyError {
 
 impl std::error::Error for MasterKeyError {}
 
+/// HSM backend label (safe to persist / log).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HsmBackend {
+    /// PKCS#11 token.
+    Pkcs11,
+    /// TPM 2.0.
+    Tpm,
+}
+
+impl HsmBackend {
+    /// Stable label for meta / telemetry (`pkcs11` or `tpm`).
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Pkcs11 => "pkcs11",
+            Self::Tpm => "tpm",
+        }
+    }
+}
+
 /// Where the resolved master key came from (for meta / telemetry; never holds key bytes).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MasterKeyProvenance {
@@ -100,24 +121,32 @@ pub enum MasterKeyProvenance {
         /// Opaque KMS / Transit key identifier (safe to persist).
         key_id: String,
     },
+    /// Unwrapped via PKCS#11 or TPM; `key_id` is an opaque label or handle string.
+    Hsm {
+        /// Which HSM backend performed the unwrap.
+        backend: HsmBackend,
+        /// Opaque key label / handle (safe to persist).
+        key_id: String,
+    },
 }
 
 impl MasterKeyProvenance {
-    /// Valence `NeutrinoMasterKeyMeta.source` enum value (`env` or `kms`).
+    /// Valence `NeutrinoMasterKeyMeta.source` enum value (`env`, `kms`, or `hsm`).
     #[must_use]
     pub const fn source_label(&self) -> &'static str {
         match self {
             Self::Env => "env",
             Self::Kms { .. } => "kms",
+            Self::Hsm { .. } => "hsm",
         }
     }
 
-    /// Opaque key id when provenance is KMS; empty for env.
+    /// Opaque key id when provenance is KMS or HSM; empty for env.
     #[must_use]
     pub const fn key_id(&self) -> &str {
         match self {
             Self::Env => "",
-            Self::Kms { key_id } => key_id.as_str(),
+            Self::Kms { key_id } | Self::Hsm { key_id, .. } => key_id.as_str(),
         }
     }
 }
@@ -179,6 +208,17 @@ impl AsRef<[u8]> for ResolvedMasterKey {
 pub trait KeySource: Send + Sync {
     /// Resolve master key bytes (and provenance).
     async fn resolve(&self) -> Result<ResolvedMasterKey, MasterKeyError>;
+}
+
+/// Injectable decrypt seam for KMS/HSM unit tests (ciphertext → plaintext master key bytes).
+#[async_trait]
+pub trait WrappedKeyDecryptor: Send + Sync {
+    /// Decrypt wrapped master-key ciphertext.
+    async fn decrypt(
+        &self,
+        ciphertext: &[u8],
+        key_id: &str,
+    ) -> Result<Zeroizing<Vec<u8>>, MasterKeyError>;
 }
 
 /// Env-backed [`KeySource`] (`NEUTRINO_MASTER_KEY`).
@@ -246,6 +286,10 @@ pub enum KeySourceKind {
     GcpKms,
     /// `vault-transit` (requires `kms-vault-transit`).
     VaultTransit,
+    /// `pkcs11` (requires `hsm-pkcs11`).
+    Pkcs11,
+    /// `tpm` (requires `hsm-tpm`).
+    Tpm,
 }
 
 impl KeySourceKind {
@@ -268,6 +312,12 @@ impl KeySourceKind {
         if t.eq_ignore_ascii_case("vault-transit") {
             return Ok(Self::VaultTransit);
         }
+        if t.eq_ignore_ascii_case("pkcs11") {
+            return Ok(Self::Pkcs11);
+        }
+        if t.eq_ignore_ascii_case("tpm") {
+            return Ok(Self::Tpm);
+        }
         Err(MasterKeyError::Config {
             source_kind: "unknown",
             field: "NEUTRINO_KEY_SOURCE",
@@ -282,6 +332,8 @@ impl KeySourceKind {
             Self::AwsKms => "aws-kms",
             Self::GcpKms => "gcp-kms",
             Self::VaultTransit => "vault-transit",
+            Self::Pkcs11 => "pkcs11",
+            Self::Tpm => "tpm",
         }
     }
 }
@@ -323,7 +375,7 @@ fn log_resolve(source: &str, outcome: &str) {
 /// Resolve the process master key using `NEUTRINO_KEY_SOURCE` (default `env`).
 ///
 /// Successful results are cached in-process for the lifetime of the process (or until
-/// [`clear_master_key_cache`]). KMS paths unwrap `NEUTRINO_MASTER_KEY_WRAPPED` via the
+/// [`clear_master_key_cache`]). KMS/HSM paths unwrap `NEUTRINO_MASTER_KEY_WRAPPED` via the
 /// selected provider; see crate docs for env vars.
 ///
 /// # Errors
@@ -391,30 +443,67 @@ async fn resolve_master_key_uncached(
                 })
             }
         }
+        KeySourceKind::Pkcs11 => {
+            #[cfg(feature = "hsm-pkcs11")]
+            {
+                crate::hsm_sources::pkcs11::Pkcs11KeySource::from_env()?
+                    .resolve()
+                    .await
+            }
+            #[cfg(not(feature = "hsm-pkcs11"))]
+            {
+                Err(MasterKeyError::FeatureDisabled {
+                    source_kind: "pkcs11",
+                })
+            }
+        }
+        KeySourceKind::Tpm => {
+            #[cfg(feature = "hsm-tpm")]
+            {
+                crate::hsm_sources::tpm::TpmKeySource::from_env()?
+                    .resolve()
+                    .await
+            }
+            #[cfg(not(feature = "hsm-tpm"))]
+            {
+                Err(MasterKeyError::FeatureDisabled { source_kind: "tpm" })
+            }
+        }
     }
 }
 
-/// Decode `NEUTRINO_MASTER_KEY_WRAPPED` as standard base64 (AWS/GCP binary ciphertext).
+/// Decode `NEUTRINO_MASTER_KEY_WRAPPED` as standard base64 (KMS/HSM binary ciphertext).
 ///
 /// # Errors
 ///
 /// [`MasterKeyError::Config`] when unset, empty, or not valid base64.
 pub fn wrapped_master_key_from_env() -> Result<Vec<u8>, MasterKeyError> {
+    wrapped_master_key_from_env_kind("kms")
+}
+
+/// Decode `NEUTRINO_MASTER_KEY_WRAPPED` as standard base64 with a source-kind label for errors.
+///
+/// # Errors
+///
+/// [`MasterKeyError::Config`] when unset, empty, or not valid base64.
+pub fn wrapped_master_key_from_env_kind(
+    source_kind: &'static str,
+) -> Result<Vec<u8>, MasterKeyError> {
     let raw = std::env::var("NEUTRINO_MASTER_KEY_WRAPPED").map_err(|_| MasterKeyError::Config {
-        source_kind: "kms",
+        source_kind,
         field: "NEUTRINO_MASTER_KEY_WRAPPED",
     })?;
     let t = raw.trim();
     if t.is_empty() {
         return Err(MasterKeyError::Config {
-            source_kind: "kms",
+            source_kind,
             field: "NEUTRINO_MASTER_KEY_WRAPPED",
         });
     }
     base64::engine::general_purpose::STANDARD
         .decode(t)
         .map_err(|_| MasterKeyError::Config {
-            source_kind: "kms",
+            source_kind,
             field: "NEUTRINO_MASTER_KEY_WRAPPED",
         })
 }
@@ -550,6 +639,11 @@ mod tests {
             KeySourceKind::parse("aws-kms").unwrap(),
             KeySourceKind::AwsKms
         );
+        assert_eq!(
+            KeySourceKind::parse("pkcs11").unwrap(),
+            KeySourceKind::Pkcs11
+        );
+        assert_eq!(KeySourceKind::parse("tpm").unwrap(), KeySourceKind::Tpm);
         let err = KeySourceKind::parse("bogus").unwrap_err();
         assert!(matches!(
             err,
@@ -558,6 +652,48 @@ mod tests {
                 ..
             }
         ));
+    }
+
+    #[test]
+    fn resolve_hsm_without_feature_sad() {
+        let hex64 = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+        with_master_key_env(Some(hex64), None, Some("pkcs11"), || {
+            let err = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .expect("rt")
+                .block_on(resolve_master_key())
+                .expect_err("feature or config");
+            #[cfg(not(feature = "hsm-pkcs11"))]
+            {
+                assert_eq!(
+                    err,
+                    MasterKeyError::FeatureDisabled {
+                        source_kind: "pkcs11",
+                    }
+                );
+            }
+            #[cfg(feature = "hsm-pkcs11")]
+            {
+                assert!(matches!(err, MasterKeyError::Config { .. }));
+            }
+        });
+        with_master_key_env(Some(hex64), None, Some("tpm"), || {
+            let err = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .expect("rt")
+                .block_on(resolve_master_key())
+                .expect_err("feature or config");
+            #[cfg(not(feature = "hsm-tpm"))]
+            {
+                assert_eq!(err, MasterKeyError::FeatureDisabled { source_kind: "tpm" });
+            }
+            #[cfg(feature = "hsm-tpm")]
+            {
+                assert!(matches!(err, MasterKeyError::Config { .. }));
+            }
+        });
     }
 
     #[test]

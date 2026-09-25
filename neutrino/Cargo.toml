@@ -41,7 +41,9 @@ chronon-valence-identity = { workspace = true, optional = true }
 aws-config = { version = "1", optional = true }
 aws-sdk-kms = { version = "1", optional = true }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"], optional = true }
-tokio = { workspace = true, optional = true, features = ["sync"] }
+tokio = { workspace = true, optional = true, features = ["sync", "rt"] }
+cryptoki = { version = "0.12", optional = true }
+tss-esapi = { version = "7.7", optional = true }
 
 [features]
 default = []
@@ -68,8 +70,8 @@ rbac-tests = ["ssr", "dep:gauge", "gauge/ssr", "dep:lepton", "lepton/ssr"]
 kms-aws = ["dep:aws-config", "dep:aws-sdk-kms", "dep:tokio"]
 kms-gcp = ["dep:reqwest"]
 kms-vault-transit = ["dep:reqwest"]
-hsm-pkcs11 = []
-hsm-tpm = []
+hsm-pkcs11 = ["dep:cryptoki", "dep:tokio"]
+hsm-tpm = ["dep:tss-esapi", "dep:tokio"]
 
 [build-dependencies]
 valence-codegen = { workspace = true }
@@ -115,6 +117,14 @@ required-features = ["rbac-tests"]
 [[test]]
 name = "security_contract"
 required-features = ["rbac-tests"]
+
+[[test]]
+name = "hsm_pkcs11_integration"
+required-features = ["hsm-pkcs11"]
+
+[[test]]
+name = "hsm_tpm_integration"
+required-features = ["hsm-tpm"]
 
 [[test]]
 name = "access_matrix_contract"

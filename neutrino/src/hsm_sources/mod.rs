@@ -1,20 +1,17 @@
-//! KMS-backed master key sources (AWS KMS, GCP KMS, Vault Transit).
+//! Hardware-backed master key sources (PKCS#11 and TPM 2.0).
 //!
 //! These unwrap a wrapped process master key. Customer secrets remain in Valence;
-//! enable one Cargo feature and set `NEUTRINO_KEY_SOURCE` accordingly.
+//! enable `hsm-pkcs11` and/or `hsm-tpm` and set `NEUTRINO_KEY_SOURCE` accordingly.
 
-use crate::key_source::{MasterKeyError, MasterKeyProvenance, ResolvedMasterKey};
+use crate::key_source::{HsmBackend, MasterKeyError, MasterKeyProvenance, ResolvedMasterKey};
 
 pub use crate::key_source::WrappedKeyDecryptor;
 
-#[cfg(feature = "kms-aws")]
-pub mod aws;
+#[cfg(feature = "hsm-pkcs11")]
+pub mod pkcs11;
 
-#[cfg(feature = "kms-gcp")]
-pub mod gcp;
-
-#[cfg(feature = "kms-vault-transit")]
-pub mod vault_transit;
+#[cfg(feature = "hsm-tpm")]
+pub mod tpm;
 
 pub(crate) fn require_env(
     var: &'static str,
@@ -34,11 +31,21 @@ pub(crate) fn require_env(
     Ok(t.to_string())
 }
 
-pub(crate) fn resolved_kms(
+pub(crate) fn resolved_hsm(
     bytes: zeroize::Zeroizing<Vec<u8>>,
+    backend: HsmBackend,
     key_id: String,
-) -> ResolvedMasterKey {
-    ResolvedMasterKey::new(bytes, MasterKeyProvenance::Kms { key_id })
+) -> Result<ResolvedMasterKey, MasterKeyError> {
+    if bytes.len() != 32 {
+        return Err(MasterKeyError::Provider {
+            provider: backend.as_str(),
+            operation: "Decrypt",
+        });
+    }
+    Ok(ResolvedMasterKey::new(
+        bytes,
+        MasterKeyProvenance::Hsm { backend, key_id },
+    ))
 }
 
 pub(crate) fn log_provider_err(provider: &str, operation: &str, error_class: &str) {

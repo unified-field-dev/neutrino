@@ -15,7 +15,7 @@
 //! | Product / UI vault API | [`vault`] (feature `ssr`) |
 //! | Gauge per-secret authz | [`actor_can_secret`], [`ensure_secret_permission_bundle`] |
 //! | Gauge bootstrap + create gate | [`create_initial_neutrino_groups`], [`CREATE_NEUTRINO_SECRETS`] |
-//! | Master key env / KMS unwrap | [`key_source`] / [`resolve_master_key`] / [`MasterKeyError`] |
+//! | Master key env / KMS / HSM unwrap | [`key_source`] / [`resolve_master_key`] / [`MasterKeyError`] |
 //! | Bootstrap env classification / seed | [`bootstrap_trust`], [`bootstrap_seeder`] |
 //! | Low-level seal/unseal | [`crypto`] |
 //! | Typed failures | [`NeutrinoError`] / [`NeutrinoResult`] |
@@ -50,12 +50,16 @@
 //!   sealed store on first boot and emits `scoped_credentials_refs_json`.
 //!   [Get started](#bootstrap-env-seed).
 //! - **Master key resolution** — Loads the process master key via [`resolve_master_key`]
-//!   (`NEUTRINO_MASTER_KEY` by default, or KMS unwrap when `NEUTRINO_KEY_SOURCE` and a
-//!   `kms-*` feature are set) as typed [`MasterKeyError`]-bearing bytes before seal or reveal.
+//!   (`NEUTRINO_MASTER_KEY` by default, or KMS/HSM unwrap when `NEUTRINO_KEY_SOURCE` and a
+//!   matching `kms-*` / `hsm-*` feature are set) as typed [`MasterKeyError`]-bearing bytes
+//!   before seal or reveal.
 //!   [Get started](#resolve-master-key).
 //! - **KMS master-key sources** — Optional AWS KMS, GCP KMS, or Vault Transit unwrap of a
 //!   wrapped master key (`NEUTRINO_MASTER_KEY_WRAPPED`). Customer secrets stay in Valence;
 //!   KMS only protects the process key. [Get started](#resolve-master-key).
+//! - **Hardware master-key unwrap** — Resolve the process master key via PKCS#11 or TPM 2.0
+//!   (`hsm-pkcs11` / `hsm-tpm`, RSA-OAEP unwrap of `NEUTRINO_MASTER_KEY_WRAPPED`).
+//!   [Get started](#resolve-master-key).
 //! - **Secret access model** — Who can browse, reveal, edit, and delete a secret,
 //!   what Super User can always do, and which Gauge objects a new secret creates.
 //!   Read this before you store your first credential. [Get started](#secret-access-model).
@@ -399,14 +403,15 @@
 //! [`resolve_master_key`] loads the process master key before any seal or reveal.
 //! Default source is `NEUTRINO_KEY_SOURCE=env` (or unset): 32-byte hex via
 //! `NEUTRINO_MASTER_KEY`, or a weak UTF-8 escape when explicitly allowed. With a
-//! `kms-*` Cargo feature, set `NEUTRINO_KEY_SOURCE` to `aws-kms`, `gcp-kms`, or
-//! `vault-transit` and provide `NEUTRINO_MASTER_KEY_WRAPPED` plus provider key id
-//! env vars — KMS unwraps the master key only; customer secrets remain in Valence.
-//! Resolve during process startup before constructing [`ValenceSealedStore`] or calling
-//! [`seed_bootstrap_secrets_from_env`]. [`master_key_from_env`] remains the env-only helper.
+//! `kms-*` or `hsm-*` Cargo feature, set `NEUTRINO_KEY_SOURCE` to `aws-kms`, `gcp-kms`,
+//! `vault-transit`, `pkcs11`, or `tpm` and provide `NEUTRINO_MASTER_KEY_WRAPPED` plus
+//! provider env vars — the provider unwraps the master key only; customer secrets remain
+//! in Valence. Resolve during process startup before constructing [`ValenceSealedStore`]
+//! or calling [`seed_bootstrap_secrets_from_env`]. [`master_key_from_env`] remains the
+//! env-only helper.
 //!
 //! **Prerequisites:** `NEUTRINO_MASTER_KEY` set (env source), or wrapped key + provider
-//! config when using a KMS source.
+//! config when using a KMS or HSM source.
 //!
 //! ```ignore
 //! use neutrino::resolve_master_key;
@@ -431,6 +436,39 @@
 //! assert_eq!(key.len(), 32);
 //! ```
 //!
+//! PKCS#11 variant (`feature = "hsm-pkcs11"`): set `NEUTRINO_KEY_SOURCE=pkcs11`,
+//! `NEUTRINO_MASTER_KEY_WRAPPED` (RSA-OAEP ciphertext of a 32-byte MEK),
+//! `NEUTRINO_PKCS11_MODULE`, `NEUTRINO_PKCS11_PIN`, and `NEUTRINO_PKCS11_KEY_LABEL`.
+//!
+//! ```ignore
+//! // cargo build -p neutrino --features hsm-pkcs11
+//! // std::env::set_var("NEUTRINO_KEY_SOURCE", "pkcs11");
+//! // std::env::set_var("NEUTRINO_MASTER_KEY_WRAPPED", "<base64>");
+//! // std::env::set_var("NEUTRINO_PKCS11_MODULE", "/usr/lib/softhsm/libsofthsm2.so");
+//! // std::env::set_var("NEUTRINO_PKCS11_PIN", "<pin>");
+//! // std::env::set_var("NEUTRINO_PKCS11_KEY_LABEL", "neutrino-mek");
+//! use neutrino::resolve_master_key;
+//!
+//! let key = resolve_master_key().await?;
+//! assert_eq!(key.len(), 32);
+//! assert_eq!(key.provenance().source_label(), "hsm");
+//! ```
+//!
+//! TPM variant (`feature = "hsm-tpm"`): set `NEUTRINO_KEY_SOURCE=tpm`,
+//! `NEUTRINO_MASTER_KEY_WRAPPED`, `NEUTRINO_TPM_TCTI`, and `NEUTRINO_TPM_KEY_HANDLE`.
+//!
+//! ```ignore
+//! // cargo build -p neutrino --features hsm-tpm
+//! // std::env::set_var("NEUTRINO_KEY_SOURCE", "tpm");
+//! // std::env::set_var("NEUTRINO_MASTER_KEY_WRAPPED", "<base64>");
+//! // std::env::set_var("NEUTRINO_TPM_TCTI", "device:/dev/tpmrm0");
+//! // std::env::set_var("NEUTRINO_TPM_KEY_HANDLE", "0x81000001");
+//! use neutrino::resolve_master_key;
+//!
+//! let key = resolve_master_key().await?;
+//! assert_eq!(key.len(), 32);
+//! ```
+//!
 //! On failure, inspect [`MasterKeyError`] variants (`NotSet`, `Empty`, `InvalidHex`,
 //! `WeakKeyRejected`, `Config`, `Provider`, `Unavailable`, `FeatureDisabled`). Next:
 //! [Gauge bootstrap](#gauge-bootstrap-at-boot) if not done, then
@@ -446,7 +484,8 @@
 //! | `kms-aws` | AWS KMS [`KeySource`] unwrap (`AwsKmsKeySource`) |
 //! | `kms-gcp` | GCP Cloud KMS [`KeySource`] unwrap |
 //! | `kms-vault-transit` | HashiCorp Vault Transit [`KeySource`] unwrap |
-//! | `hsm-pkcs11` / `hsm-tpm` | Stub Cargo gates for future HSM key sources |
+//! | `hsm-pkcs11` | PKCS#11 `KeySource` unwrap (`Pkcs11KeySource`) |
+//! | `hsm-tpm` | TPM 2.0 `KeySource` unwrap (`TpmKeySource`) |
 //!
 //! ## Examples
 //!
@@ -530,8 +569,9 @@ pub use bootstrap_seeder::{
 pub use bootstrap_trust::{classify_env_key, SecretLifecycleClass};
 pub use error::{NeutrinoError, NeutrinoResult};
 pub use key_source::{
-    clear_master_key_cache, master_key_from_env, resolve_master_key, EnvKeySource, KeySource,
-    KeySourceKind, MasterKeyError, MasterKeyProvenance, ResolvedMasterKey,
+    clear_master_key_cache, master_key_from_env, resolve_master_key, EnvKeySource, HsmBackend,
+    KeySource, KeySourceKind, MasterKeyError, MasterKeyProvenance, ResolvedMasterKey,
+    WrappedKeyDecryptor,
 };
 #[cfg(feature = "ssr")]
 pub use scope_prefix::scope_path_matches_prefix;
