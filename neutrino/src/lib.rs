@@ -73,6 +73,10 @@
 //! - **Control-plane secret lane** — Boot jobs and background workers read secrets through
 //!   a System-from-start handle that skips session Gauge checks by design.
 //!   [Get started](#control-plane-secret-lane).
+//! - **Short-lived secret lease** — [`secret_store::SecretStore::lease`] returns
+//!   Zeroizing plaintext for a TTL (Reveal-gated), for env injection on apply paths.
+//!   [`secret_store::SecretStore::extend_grace`] keeps a prior version leaseable after a failed apply.
+//!   [Get started](#lease-secret).
 //!
 //! Product vault HTTP-facing helpers live in [`vault`]; per-secret Gauge checks use
 //! [`actor_can_secret`]. Low-level seal/unseal is in [`crypto`]. Backend selection uses
@@ -345,6 +349,58 @@
 //! Errors aggregate authz and store failures via [`NeutrinoError`]. Next: [reveal](#reveal-secret)
 //! the new version, or [delete](#delete-secret) when retiring the credential.
 //!
+//! ## Lease secret
+//!
+//! A lease hands short-lived plaintext to a named consumer (`leased_to`) for env injection
+//! or Parton Deploy. It is Reveal-gated like vault reveal, returns [`secret_store::SecretLease`]
+//! (`Zeroizing` plaintext, `lease_id`, `expires_at`, version), and never logs the bytes.
+//! After rotate, the prior version can sit in `grace` so a failed apply can still lease it
+//! via [`secret_store::SecretStore::extend_grace`]. Call once when the worker applies a
+//! rotate event (Boson / control-plane System); interactive UI should keep using reveal.
+//!
+//! **Prerequisites:** authorized Reveal (or System apply) actor; an active or grace version.
+//!
+//! ```ignore
+//! use neutrino::secret_store::{LeaseRequest, SecretStore};
+//! use std::time::Duration;
+//!
+//! let lease = store
+//!     .lease(LeaseRequest {
+//!         secret_id: secret_ref.id.clone(),
+//!         version: None,
+//!         leased_to: format!("gluon-agent-{cell}"),
+//!         ttl: Duration::from_secs(300),
+//!     })
+//!     .await?;
+//! assert!(!lease.plaintext.is_empty());
+//! // Assemble BOOTSTRAP_DB_LOGICALS_JSON; never log plaintext.
+//! ```
+//!
+//! When Deploy or db-ready fails after rotate, extend grace so the prior version stays
+//! leaseable while operators investigate (no auto-unrotate):
+//!
+//! ```ignore
+//! use neutrino::secret_store::{LeaseRequest, SecretId, SecretStore};
+//! use std::time::Duration;
+//!
+//! store
+//!     .extend_grace(&secret_ref.id, 86_400, "gluon.neutrino_rotation_apply")
+//!     .await?;
+//! let prior = store
+//!     .lease(LeaseRequest {
+//!         secret_id: secret_ref.id.clone(),
+//!         version: Some(prior_version),
+//!         leased_to: format!("gluon-agent-{cell}"),
+//!         ttl: Duration::from_secs(300),
+//!     })
+//!     .await?;
+//! assert!(!prior.plaintext.is_empty());
+//! ```
+//!
+//! Archived-only versions and missing ids return [`NeutrinoError::InvalidState`] /
+//! [`NeutrinoError::NotFound`]. Next: Gluon DB-cred apply after Photon
+//! `neutrino.secret.rotated`, or [reveal](#reveal-secret) for interactive UI.
+//!
 //! ## Delete secret
 //!
 //! Secret deletion is the permanent retirement path for a stored credential. It removes
@@ -541,6 +597,9 @@ pub mod scripts;
 pub mod sealed_store;
 #[cfg(feature = "ssr")]
 pub mod vault;
+pub mod db_scope;
+#[cfg(feature = "photon")]
+pub mod rotation_event;
 #[cfg(feature = "ssr")]
 pub(crate) mod vault_gauge;
 
@@ -575,6 +634,12 @@ pub use key_source::{
 };
 #[cfg(feature = "ssr")]
 pub use scope_prefix::scope_path_matches_prefix;
+pub use db_scope::is_db_scoped_creds_path;
+#[cfg(feature = "photon")]
+pub use rotation_event::{
+    publish_if_db_scoped_secret_rotated, publish_neutrino_secret_rotated,
+    publish_neutrino_secret_rotated_with_scope, NeutrinoSecretRotated,
+};
 #[cfg(feature = "ssr")]
 pub use sealed_store::{list_secrets, ListedSecret, ValenceSealedStore};
 pub use secret_backend::{

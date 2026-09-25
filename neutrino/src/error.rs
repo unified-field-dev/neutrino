@@ -31,6 +31,13 @@ pub enum NeutrinoError {
         /// Human-readable reason (no secret material).
         message: String,
     },
+    /// Secret or version is in a state that blocks the operation (e.g. archived-only).
+    InvalidState {
+        /// Operation label (e.g. `lease`, `extend_grace`).
+        operation: &'static str,
+        /// Human-readable reason (no secret material).
+        message: String,
+    },
     /// Master-key / backend configuration failure.
     Config(MasterKeyError),
     /// Seal / unseal / key-derivation failure (no key material in messages).
@@ -65,6 +72,9 @@ impl fmt::Display for NeutrinoError {
                 write!(f, "not authorized to {operation}")
             }
             Self::Validation { message, .. } => write!(f, "{message}"),
+            Self::InvalidState { operation, message } => {
+                write!(f, "neutrino {operation}: {message}")
+            }
             Self::Config(e) => write!(f, "{e}"),
             Self::Crypto { operation, source } => {
                 write!(f, "crypto {operation} failed: {source}")
@@ -116,6 +126,13 @@ impl NeutrinoError {
         }
     }
 
+    pub(crate) fn invalid_state(operation: &'static str, message: impl Into<String>) -> Self {
+        Self::InvalidState {
+            operation,
+            message: message.into(),
+        }
+    }
+
     pub(crate) fn crypto(operation: &'static str, source: impl Into<anyhow::Error>) -> Self {
         Self::Crypto {
             operation,
@@ -159,6 +176,10 @@ mod tests {
             &validation,
             NeutrinoError::Validation { field: "Name", .. }
         ));
+
+        let invalid = NeutrinoError::invalid_state("lease", "archived only");
+        assert!(invalid.to_string().contains("lease"));
+        assert!(invalid.to_string().contains("archived"));
 
         let config = NeutrinoError::from(MasterKeyError::NotSet);
         assert!(config.to_string().contains("NEUTRINO_MASTER_KEY"));

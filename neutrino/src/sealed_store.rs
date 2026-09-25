@@ -23,7 +23,9 @@ use crate::instrumentation::{
 };
 use crate::key_source::resolve_master_key;
 use crate::master_key_meta::ensure_master_key_meta;
-use crate::secret_store::{PutSecretRequest, RevealedSecret, SecretId, SecretRef, SecretStore};
+use crate::secret_store::{
+    LeaseRequest, PutSecretRequest, RevealedSecret, SecretId, SecretLease, SecretRef, SecretStore,
+};
 use crate::vault_gauge::{
     auth_valence_for_store, delete_secret_permission_bundle, ensure_actor_can_secret,
     ensure_can_create_secret, ensure_secret_permission_bundle, maintainer_actor_for_put,
@@ -135,7 +137,7 @@ fn viewer_key_for_store(store: &ValenceSealedStore) -> String {
 }
 
 fn audit_append_must_succeed(action: &'static str) -> bool {
-    matches!(action, "put" | "delete" | "rotate")
+    matches!(action, "put" | "delete" | "rotate" | "extend_grace")
 }
 
 /// Gate for `put_or_reuse` when a name+scope row already exists (decrypt / rotate).
@@ -516,7 +518,7 @@ impl SecretStore for ValenceSealedStore {
 
         old_row
             .get_mutable_used(self.valence.as_ref(), valence::use_!(r"In **Neutrino sealed vault**, we **update this data** so later steps see the latest values for this workflow. Callers allowed for **Neutrino sealed vault** use the updated data; this is not a public export of unrelated fields."))
-            .set_status(NeutrinoSecretVersionStatus::Archived)
+            .set_status(NeutrinoSecretVersionStatus::Grace)
             .map_err(|e| NeutrinoError::service("rotate", e))?
             .commit()
             .await
@@ -558,6 +560,111 @@ impl SecretStore for ValenceSealedStore {
             id: id.clone(),
             version: new_ver,
         })
+    }
+
+    async fn lease(&self, req: LeaseRequest) -> NeutrinoResult<SecretLease> {
+        let leased_to = req.leased_to.trim();
+        if leased_to.is_empty() {
+            return Err(NeutrinoError::validation(
+                "leased_to",
+                "leased_to must not be empty",
+            ));
+        }
+        if req.ttl.is_zero() {
+            return Err(NeutrinoError::validation(
+                "ttl",
+                "ttl must be greater than zero",
+            ));
+        }
+        // Cap TTL to avoid accidental long-lived plaintext windows.
+        let ttl_secs = req.ttl.as_secs().clamp(1, 600);
+        let sid = req.secret_id.0.as_str();
+        let auth_v = auth_valence_for_store(self);
+        ensure_actor_can_secret(&auth_v, sid, ResourceAction::Reveal).await?;
+
+        let version = match req.version {
+            Some(v) => v,
+            None => {
+                let secret = NeutrinoSecret::get_used(sid, self.valence.as_ref(), valence::use_!(r"When an app or operator **adds a secret to the Neutrino vault**, we store its **name, where it applies, what kind it is, and which version is current**—not the secret itself—so people and services that are allowed can find and manage it later."))
+                    .await
+                    .map_err(|e| NeutrinoError::service("valence", e))?
+                    .ok_or_else(|| NeutrinoError::not_found(sid))?;
+                *secret.current_version()
+            }
+        };
+
+        let revealed = self
+            .reveal_at_version_with_action(&req.secret_id, version, "lease")
+            .await?;
+        let expires_at = Utc::now() + chrono::Duration::seconds(ttl_secs as i64);
+        Ok(SecretLease {
+            lease_id: Uuid::new_v4().to_string(),
+            id: revealed.id,
+            version: revealed.version,
+            plaintext: revealed.plaintext,
+            leased_to: leased_to.to_string(),
+            expires_at,
+        })
+    }
+
+    async fn extend_grace(
+        &self,
+        id: &SecretId,
+        grace_secs: u64,
+        actor: &str,
+    ) -> NeutrinoResult<()> {
+        let _ = grace_secs; // reserved for grace_until persistence in a later schema bump
+        let sid = id.0.as_str();
+        let secret = NeutrinoSecret::get_used(sid, self.valence.as_ref(), valence::use_!(r"When an app or operator **adds a secret to the Neutrino vault**, we store its **name, where it applies, what kind it is, and which version is current**—not the secret itself—so people and services that are allowed can find and manage it later."))
+            .await
+            .map_err(|e| NeutrinoError::service("valence", e))?
+            .ok_or_else(|| NeutrinoError::not_found(sid))?;
+        let current = *secret.current_version();
+        if current <= 1 {
+            return Err(NeutrinoError::invalid_state(
+                "extend_grace",
+                "no prior version to keep in grace",
+            ));
+        }
+        let prior = current - 1;
+        let scope_path = secret.scope_path().clone();
+        let secret_name = secret.name().clone();
+        let secret_rid = RecordId::new("neutrino_secret", sid);
+        let rows = NeutrinoSecretVersion::query_used(self.valence.as_ref(), valence::use_!(r"When we **write that secret into the vault**, we **save one sealed version**: the **encrypted secret** plus what is needed to unlock it later. The vault **encrypts the secret with the master key** before this save; later, only callers who are allowed can **unlock it in memory on the server**—not other tenants, and not as a downloadable plaintext file in this step."))
+            .where_secret_id(RecordPredicate::Equals(secret_rid))
+            .await
+            .map_err(|e| NeutrinoError::service("valence", e))?;
+        let prior_row = rows
+            .into_iter()
+            .find(|r| *r.version_num() == prior)
+            .ok_or_else(|| NeutrinoError::not_found(sid))?;
+
+        prior_row
+            .get_mutable_used(self.valence.as_ref(), valence::use_!(r"In **Neutrino sealed vault**, we **update this data** so later steps see the latest values for this workflow. Callers allowed for **Neutrino sealed vault** use the updated data; this is not a public export of unrelated fields."))
+            .set_status(NeutrinoSecretVersionStatus::Grace)
+            .map_err(|e| NeutrinoError::service("extend_grace", e))?
+            .commit()
+            .await
+            .map_err(|e| NeutrinoError::service("valence", e))?;
+
+        let audit = if actor.trim().is_empty() {
+            audit_actor_for_store(self)
+        } else {
+            actor.to_string()
+        };
+        emit_access(
+            self,
+            "extend_grace",
+            audit.as_str(),
+            sid,
+            prior,
+            scope_path.as_str(),
+            secret_name.as_str(),
+            "ok",
+            "",
+        )
+        .await?;
+        Ok(())
     }
 }
 
