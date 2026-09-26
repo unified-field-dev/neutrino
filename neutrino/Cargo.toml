@@ -44,19 +44,8 @@ reqwest = { version = "0.12", default-features = false, features = ["json", "rus
 tokio = { workspace = true, optional = true, features = ["sync", "rt"] }
 cryptoki = { version = "0.12", optional = true }
 tss-esapi = { version = "7.7", optional = true }
-photon = {
-    package = "uf-photon",
-    git = "https://github.com/unified-field-dev/photon",
-    branch = "main",
-    default-features = false,
-    features = ["runtime"],
-    optional = true,
-}
-photon-macros = {
-    git = "https://github.com/unified-field-dev/photon",
-    branch = "main",
-    optional = true,
-}
+photon = { package = "uf-photon", git = "https://github.com/unified-field-dev/photon", branch = "main", default-features = false, features = ["runtime"], optional = true }
+photon-macros = { git = "https://github.com/unified-field-dev/photon", branch = "main", optional = true }
 futures = { workspace = true, optional = true }
 
 [features]

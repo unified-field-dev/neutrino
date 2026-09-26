@@ -60,7 +60,7 @@ pub async fn list_secrets(
     scope_prefix: Option<&str>,
 ) -> NeutrinoResult<Vec<ListedSecret>> {
     crate::ensure_secret_backend_supported()?;
-    let mut rows: Vec<NeutrinoSecret> = NeutrinoSecret::query_used(valence, valence::use_!(r"When an app or operator **adds a secret to the Neutrino vault**, we store its **name, where it applies, what kind it is, and which version is current**—not the secret itself—so people and services that are allowed can find and manage it later."))
+    let mut rows: Vec<NeutrinoSecret> = NeutrinoSecret::query(valence, valence::use_!(r"When an app or operator **adds a secret to the Neutrino vault**, we store its **name, where it applies, what kind it is, and which version is current**—not the secret itself—so people and services that are allowed can find and manage it later."))
         .await
         .map_err(|e| NeutrinoError::service("valence", e))?;
     rows.sort_by_key(|r| *r.created_at());
@@ -266,7 +266,7 @@ impl SecretStore for ValenceSealedStore {
         )
         .map_err(|e| NeutrinoError::service("valence", e))?;
 
-        let created = match NeutrinoSecret::upsert_used(sid.as_str(), secret_row, self.valence.as_ref(), valence::use_!(r"When an app or operator **adds a secret to the Neutrino vault**, we store its **name, where it applies, what kind it is, and which version is current**—not the secret itself—so people and services that are allowed can find and manage it later."))
+        let created = match NeutrinoSecret::upsert(sid.as_str(), secret_row, self.valence.as_ref(), valence::use_!(r"When an app or operator **adds a secret to the Neutrino vault**, we store its **name, where it applies, what kind it is, and which version is current**—not the secret itself—so people and services that are allowed can find and manage it later."))
             .await
         {
             Ok(row) => row,
@@ -301,8 +301,8 @@ impl SecretStore for ValenceSealedStore {
         )
         .map_err(|e| NeutrinoError::service("valence", e))?;
 
-        if let Err(e) = NeutrinoSecretVersion::create_used(ver_row, self.valence.as_ref(), valence::use_!(r"When we **write that secret into the vault**, we **save one sealed version**: the **encrypted secret** plus what is needed to unlock it later. The vault **encrypts the secret with the master key** before this save; later, only callers who are allowed can **unlock it in memory on the server**—not other tenants, and not as a downloadable plaintext file in this step.")).await {
-            let _ = NeutrinoSecret::delete_now_used(persisted_id.as_str(), self.valence.as_ref(), valence::use_!(r"When an app or operator **adds a secret to the Neutrino vault**, we store its **name, where it applies, what kind it is, and which version is current**—not the secret itself—so people and services that are allowed can find and manage it later.")).await;
+        if let Err(e) = NeutrinoSecretVersion::create(ver_row, self.valence.as_ref(), valence::use_!(r"When we **write that secret into the vault**, we **save one sealed version**: the **encrypted secret** plus what is needed to unlock it later. The vault **encrypts the secret with the master key** before this save; later, only callers who are allowed can **unlock it in memory on the server**—not other tenants, and not as a downloadable plaintext file in this step.")).await {
+            let _ = NeutrinoSecret::delete_now(persisted_id.as_str(), self.valence.as_ref(), valence::use_!(r"When an app or operator **adds a secret to the Neutrino vault**, we store its **name, where it applies, what kind it is, and which version is current**—not the secret itself—so people and services that are allowed can find and manage it later.")).await;
             let _ =
                 delete_secret_permission_bundle(self.valence.as_ref(), persisted_id.as_str()).await;
             return Err(NeutrinoError::service("valence", e));
@@ -329,7 +329,7 @@ impl SecretStore for ValenceSealedStore {
 
     async fn put_or_reuse(&self, req: PutSecretRequest) -> NeutrinoResult<SecretRef> {
         crate::ensure_secret_backend_supported()?;
-        let mut matches: Vec<NeutrinoSecret> = NeutrinoSecret::query_used(self.valence.as_ref(), valence::use_!(r"When an app or operator **adds a secret to the Neutrino vault**, we store its **name, where it applies, what kind it is, and which version is current**—not the secret itself—so people and services that are allowed can find and manage it later."))
+        let mut matches: Vec<NeutrinoSecret> = NeutrinoSecret::query(self.valence.as_ref(), valence::use_!(r"When an app or operator **adds a secret to the Neutrino vault**, we store its **name, where it applies, what kind it is, and which version is current**—not the secret itself—so people and services that are allowed can find and manage it later."))
             .await
             .map_err(|e| NeutrinoError::service("valence", e))?
             .into_iter()
@@ -395,7 +395,7 @@ impl SecretStore for ValenceSealedStore {
     async fn get(&self, id: &SecretId) -> NeutrinoResult<RevealedSecret> {
         crate::ensure_secret_backend_supported()?;
         let id_key = extract_id_from_record_display(id.0.as_str()).unwrap_or_else(|_| id.0.clone());
-        let secret = match NeutrinoSecret::get_used(&id_key, self.valence.as_ref(), valence::use_!(r"When an app or operator **adds a secret to the Neutrino vault**, we store its **name, where it applies, what kind it is, and which version is current**—not the secret itself—so people and services that are allowed can find and manage it later.")).await {
+        let secret = match NeutrinoSecret::get(&id_key, self.valence.as_ref(), valence::use_!(r"When an app or operator **adds a secret to the Neutrino vault**, we store its **name, where it applies, what kind it is, and which version is current**—not the secret itself—so people and services that are allowed can find and manage it later.")).await {
             Ok(Some(row)) => row,
             Ok(None) => {
                 let actor = audit_actor_for_store(self);
@@ -438,7 +438,7 @@ impl SecretStore for ValenceSealedStore {
     async fn delete(&self, id: &SecretId) -> NeutrinoResult<()> {
         crate::ensure_secret_backend_supported()?;
         let sid = id.0.as_str();
-        let secret = NeutrinoSecret::get_used(sid, self.valence.as_ref(), valence::use_!(r"When an app or operator **adds a secret to the Neutrino vault**, we store its **name, where it applies, what kind it is, and which version is current**—not the secret itself—so people and services that are allowed can find and manage it later."))
+        let secret = NeutrinoSecret::get(sid, self.valence.as_ref(), valence::use_!(r"When an app or operator **adds a secret to the Neutrino vault**, we store its **name, where it applies, what kind it is, and which version is current**—not the secret itself—so people and services that are allowed can find and manage it later."))
             .await
             .map_err(|e| NeutrinoError::service("valence", e))?
             .ok_or_else(|| NeutrinoError::not_found(sid))?;
@@ -463,7 +463,7 @@ impl SecretStore for ValenceSealedStore {
         // Sync DAG delete while Gauge grants still authorize version CascadeDelete;
         // then tear down the per-secret permission bundle.
         // Use `delete_now` (not queued `delete`) so list/reveal see the row gone in this request.
-        NeutrinoSecret::delete_now_used(sid, self.valence.as_ref(), valence::use_!(r"When an app or operator **adds a secret to the Neutrino vault**, we store its **name, where it applies, what kind it is, and which version is current**—not the secret itself—so people and services that are allowed can find and manage it later."))
+        NeutrinoSecret::delete_now(sid, self.valence.as_ref(), valence::use_!(r"When an app or operator **adds a secret to the Neutrino vault**, we store its **name, where it applies, what kind it is, and which version is current**—not the secret itself—so people and services that are allowed can find and manage it later."))
             .await
             .map_err(|e| NeutrinoError::service("delete", e))?;
         delete_secret_permission_bundle(self.valence.as_ref(), sid).await?;
@@ -481,7 +481,7 @@ impl SecretStore for ValenceSealedStore {
         ensure_master_key_meta(self.valence.as_ref(), resolved.provenance()).await;
         let master = resolved.as_slice();
         let sid = id.0.as_str();
-        let secret = NeutrinoSecret::get_used(sid, self.valence.as_ref(), valence::use_!(r"When an app or operator **adds a secret to the Neutrino vault**, we store its **name, where it applies, what kind it is, and which version is current**—not the secret itself—so people and services that are allowed can find and manage it later."))
+        let secret = NeutrinoSecret::get(sid, self.valence.as_ref(), valence::use_!(r"When an app or operator **adds a secret to the Neutrino vault**, we store its **name, where it applies, what kind it is, and which version is current**—not the secret itself—so people and services that are allowed can find and manage it later."))
             .await
             .map_err(|e| NeutrinoError::service("valence", e))?
             .ok_or_else(|| NeutrinoError::not_found(sid))?;
@@ -492,7 +492,7 @@ impl SecretStore for ValenceSealedStore {
         let now = Utc::now();
 
         let secret_rid = RecordId::new("neutrino_secret", sid);
-        let rows = NeutrinoSecretVersion::query_used(self.valence.as_ref(), valence::use_!(r"When we **write that secret into the vault**, we **save one sealed version**: the **encrypted secret** plus what is needed to unlock it later. The vault **encrypts the secret with the master key** before this save; later, only callers who are allowed can **unlock it in memory on the server**—not other tenants, and not as a downloadable plaintext file in this step."))
+        let rows = NeutrinoSecretVersion::query(self.valence.as_ref(), valence::use_!(r"When we **write that secret into the vault**, we **save one sealed version**: the **encrypted secret** plus what is needed to unlock it later. The vault **encrypts the secret with the master key** before this save; later, only callers who are allowed can **unlock it in memory on the server**—not other tenants, and not as a downloadable plaintext file in this step."))
             .where_secret_id(RecordPredicate::Equals(secret_rid.clone()))
             .await
             .map_err(|e| NeutrinoError::service("valence", e))?;
@@ -518,23 +518,23 @@ impl SecretStore for ValenceSealedStore {
             actor.to_string(),
         )
         .map_err(|e| NeutrinoError::service("valence", e))?;
-        NeutrinoSecretVersion::create_used(new_ver_row, self.valence.as_ref(), valence::use_!(r"When we **write that secret into the vault**, we **save one sealed version**: the **encrypted secret** plus what is needed to unlock it later. The vault **encrypts the secret with the master key** before this save; later, only callers who are allowed can **unlock it in memory on the server**—not other tenants, and not as a downloadable plaintext file in this step."))
+        NeutrinoSecretVersion::create(new_ver_row, self.valence.as_ref(), valence::use_!(r"When we **write that secret into the vault**, we **save one sealed version**: the **encrypted secret** plus what is needed to unlock it later. The vault **encrypts the secret with the master key** before this save; later, only callers who are allowed can **unlock it in memory on the server**—not other tenants, and not as a downloadable plaintext file in this step."))
             .await
             .map_err(|e| NeutrinoError::service("valence", e))?;
 
         old_row
-            .get_mutable_used(self.valence.as_ref(), valence::use_!(r"In **Neutrino sealed vault**, we **update this data** so later steps see the latest values for this workflow. Callers allowed for **Neutrino sealed vault** use the updated data; this is not a public export of unrelated fields."))
+            .get_mutable(self.valence.as_ref(), valence::use_!(r"In **Neutrino sealed vault**, we **update this data** so later steps see the latest values for this workflow. Callers allowed for **Neutrino sealed vault** use the updated data; this is not a public export of unrelated fields."))
             .set_status(NeutrinoSecretVersionStatus::Grace)
             .map_err(|e| NeutrinoError::service("rotate", e))?
             .commit()
             .await
             .map_err(|e| NeutrinoError::service("valence", e))?;
 
-        NeutrinoSecret::get_used(sid, self.valence.as_ref(), valence::use_!(r"When an app or operator **adds a secret to the Neutrino vault**, we store its **name, where it applies, what kind it is, and which version is current**—not the secret itself—so people and services that are allowed can find and manage it later."))
+        NeutrinoSecret::get(sid, self.valence.as_ref(), valence::use_!(r"When an app or operator **adds a secret to the Neutrino vault**, we store its **name, where it applies, what kind it is, and which version is current**—not the secret itself—so people and services that are allowed can find and manage it later."))
             .await
             .map_err(|e| NeutrinoError::service("valence", e))?
             .ok_or_else(|| NeutrinoError::service("rotate", anyhow::anyhow!("secret vanished")))?
-            .get_mutable_used(self.valence.as_ref(), valence::use_!(r"In **Neutrino sealed vault**, we **update this data** so later steps see the latest values for this workflow. Callers allowed for **Neutrino sealed vault** use the updated data; this is not a public export of unrelated fields."))
+            .get_mutable(self.valence.as_ref(), valence::use_!(r"In **Neutrino sealed vault**, we **update this data** so later steps see the latest values for this workflow. Callers allowed for **Neutrino sealed vault** use the updated data; this is not a public export of unrelated fields."))
             .set_current_version(new_ver)
             .map_err(|e| NeutrinoError::service("rotate", e))?
             .set_updated_at(now)
@@ -592,7 +592,7 @@ impl SecretStore for ValenceSealedStore {
         let version = match req.version {
             Some(v) => v,
             None => {
-                let secret = NeutrinoSecret::get_used(sid, self.valence.as_ref(), valence::use_!(r"When an app or operator **adds a secret to the Neutrino vault**, we store its **name, where it applies, what kind it is, and which version is current**—not the secret itself—so people and services that are allowed can find and manage it later."))
+                let secret = NeutrinoSecret::get(sid, self.valence.as_ref(), valence::use_!(r"When an app or operator **adds a secret to the Neutrino vault**, we store its **name, where it applies, what kind it is, and which version is current**—not the secret itself—so people and services that are allowed can find and manage it later."))
                     .await
                     .map_err(|e| NeutrinoError::service("valence", e))?
                     .ok_or_else(|| NeutrinoError::not_found(sid))?;
@@ -623,7 +623,7 @@ impl SecretStore for ValenceSealedStore {
         crate::ensure_secret_backend_supported()?;
         let _ = grace_secs; // reserved for grace_until persistence in a later schema bump
         let sid = id.0.as_str();
-        let secret = NeutrinoSecret::get_used(sid, self.valence.as_ref(), valence::use_!(r"When an app or operator **adds a secret to the Neutrino vault**, we store its **name, where it applies, what kind it is, and which version is current**—not the secret itself—so people and services that are allowed can find and manage it later."))
+        let secret = NeutrinoSecret::get(sid, self.valence.as_ref(), valence::use_!(r"When an app or operator **adds a secret to the Neutrino vault**, we store its **name, where it applies, what kind it is, and which version is current**—not the secret itself—so people and services that are allowed can find and manage it later."))
             .await
             .map_err(|e| NeutrinoError::service("valence", e))?
             .ok_or_else(|| NeutrinoError::not_found(sid))?;
@@ -638,7 +638,7 @@ impl SecretStore for ValenceSealedStore {
         let scope_path = secret.scope_path().clone();
         let secret_name = secret.name().clone();
         let secret_rid = RecordId::new("neutrino_secret", sid);
-        let rows = NeutrinoSecretVersion::query_used(self.valence.as_ref(), valence::use_!(r"When we **write that secret into the vault**, we **save one sealed version**: the **encrypted secret** plus what is needed to unlock it later. The vault **encrypts the secret with the master key** before this save; later, only callers who are allowed can **unlock it in memory on the server**—not other tenants, and not as a downloadable plaintext file in this step."))
+        let rows = NeutrinoSecretVersion::query(self.valence.as_ref(), valence::use_!(r"When we **write that secret into the vault**, we **save one sealed version**: the **encrypted secret** plus what is needed to unlock it later. The vault **encrypts the secret with the master key** before this save; later, only callers who are allowed can **unlock it in memory on the server**—not other tenants, and not as a downloadable plaintext file in this step."))
             .where_secret_id(RecordPredicate::Equals(secret_rid))
             .await
             .map_err(|e| NeutrinoError::service("valence", e))?;
@@ -648,7 +648,7 @@ impl SecretStore for ValenceSealedStore {
             .ok_or_else(|| NeutrinoError::not_found(sid))?;
 
         prior_row
-            .get_mutable_used(self.valence.as_ref(), valence::use_!(r"In **Neutrino sealed vault**, we **update this data** so later steps see the latest values for this workflow. Callers allowed for **Neutrino sealed vault** use the updated data; this is not a public export of unrelated fields."))
+            .get_mutable(self.valence.as_ref(), valence::use_!(r"In **Neutrino sealed vault**, we **update this data** so later steps see the latest values for this workflow. Callers allowed for **Neutrino sealed vault** use the updated data; this is not a public export of unrelated fields."))
             .set_status(NeutrinoSecretVersionStatus::Grace)
             .map_err(|e| NeutrinoError::service("extend_grace", e))?
             .commit()
@@ -701,7 +701,7 @@ impl ValenceSealedStore {
         let id_key = extract_id_from_record_display(id.0.as_str()).unwrap_or_else(|_| id.0.clone());
         let actor = audit_actor_for_store(self);
 
-        let secret = match NeutrinoSecret::get_used(&id_key, self.valence.as_ref(), valence::use_!(r"When an app or operator **adds a secret to the Neutrino vault**, we store its **name, where it applies, what kind it is, and which version is current**—not the secret itself—so people and services that are allowed can find and manage it later.")).await {
+        let secret = match NeutrinoSecret::get(&id_key, self.valence.as_ref(), valence::use_!(r"When an app or operator **adds a secret to the Neutrino vault**, we store its **name, where it applies, what kind it is, and which version is current**—not the secret itself—so people and services that are allowed can find and manage it later.")).await {
             Ok(Some(row)) => row,
             Ok(None) => {
                 emit_access(
@@ -739,7 +739,7 @@ impl ValenceSealedStore {
         let scope_path = secret.scope_path().clone();
         let secret_name = secret.name().clone();
         let secret_rid = RecordId::new("neutrino_secret", id_key.as_str());
-        let rows = NeutrinoSecretVersion::query_used(self.valence.as_ref(), valence::use_!(r"When we **write that secret into the vault**, we **save one sealed version**: the **encrypted secret** plus what is needed to unlock it later. The vault **encrypts the secret with the master key** before this save; later, only callers who are allowed can **unlock it in memory on the server**—not other tenants, and not as a downloadable plaintext file in this step."))
+        let rows = NeutrinoSecretVersion::query(self.valence.as_ref(), valence::use_!(r"When we **write that secret into the vault**, we **save one sealed version**: the **encrypted secret** plus what is needed to unlock it later. The vault **encrypts the secret with the master key** before this save; later, only callers who are allowed can **unlock it in memory on the server**—not other tenants, and not as a downloadable plaintext file in this step."))
             .where_secret_id(RecordPredicate::Equals(secret_rid.clone()))
             .await
             .map_err(|e| NeutrinoError::service("valence", e))?;

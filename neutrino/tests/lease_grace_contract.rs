@@ -110,7 +110,7 @@ async fn lease_archived_sad() -> anyhow::Result<()> {
     let _ = store.rotate(&cref.id, b"v2".to_vec(), "test-actor").await?;
     // Force prior version archived (rotate leaves grace; apply success path would archive).
     let secret_rid = RecordId::new("neutrino_secret", cref.id.0.as_str());
-    let rows = NeutrinoSecretVersion::query_used(
+    let rows = NeutrinoSecretVersion::query(
         store.valence.as_ref(),
         valence::use_!(r"**Test:** When we **write that secret into the vault**, we **save one sealed version**: the **encrypted secret** plus what is needed to unlock it later. The vault **encrypts the secret with the master key** before this save; later, only callers who are allowed can **unlock it in memory on the server**—not other tenants, and not as a downloadable plaintext file in this step."),
     )
@@ -122,7 +122,7 @@ async fn lease_archived_sad() -> anyhow::Result<()> {
         .find(|r| *r.version_num() == cref.version)
         .expect("prior version");
     prior
-        .get_mutable_used(
+        .get_mutable(
             store.valence.as_ref(),
             valence::use_!(r"**Test:** In **Neutrino sealed vault**, we **update this data** so later steps see the latest values for this workflow. Callers allowed for **Neutrino sealed vault** use the updated data; this is not a public export of unrelated fields."),
         )
@@ -188,7 +188,7 @@ async fn extend_grace_status_happy() -> anyhow::Result<()> {
 
     // Archive prior, then extend_grace should revive to Grace and allow lease.
     let secret_rid = RecordId::new("neutrino_secret", cref.id.0.as_str());
-    let rows = NeutrinoSecretVersion::query_used(
+    let rows = NeutrinoSecretVersion::query(
         store.valence.as_ref(),
         valence::use_!(r"**Test:** When we **write that secret into the vault**, we **save one sealed version**: the **encrypted secret** plus what is needed to unlock it later. The vault **encrypts the secret with the master key** before this save; later, only callers who are allowed can **unlock it in memory on the server**—not other tenants, and not as a downloadable plaintext file in this step."),
     )
@@ -200,7 +200,7 @@ async fn extend_grace_status_happy() -> anyhow::Result<()> {
         .find(|r| *r.version_num() == cref.version)
         .expect("prior");
     prior
-        .get_mutable_used(
+        .get_mutable(
             store.valence.as_ref(),
             valence::use_!(r"**Test:** In **Neutrino sealed vault**, we **update this data** so later steps see the latest values for this workflow. Callers allowed for **Neutrino sealed vault** use the updated data; this is not a public export of unrelated fields."),
         )
@@ -222,7 +222,7 @@ async fn extend_grace_status_happy() -> anyhow::Result<()> {
         .await?;
     assert_eq!(&*lease.plaintext, b"old");
 
-    let rows = NeutrinoSecretVersion::query_used(
+    let rows = NeutrinoSecretVersion::query(
         store.valence.as_ref(),
         valence::use_!(r"**Test:** When we **write that secret into the vault**, we **save one sealed version**: the **encrypted secret** plus what is needed to unlock it later. The vault **encrypts the secret with the master key** before this save; later, only callers who are allowed can **unlock it in memory on the server**—not other tenants, and not as a downloadable plaintext file in this step."),
     )

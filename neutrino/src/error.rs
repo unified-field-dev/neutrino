@@ -123,6 +123,7 @@ impl NeutrinoError {
         }
     }
 
+    #[cfg_attr(not(feature = "ssr"), allow(dead_code))]
     pub(crate) fn invalid_state(operation: &'static str, message: impl Into<String>) -> Self {
         Self::InvalidState {
             operation,

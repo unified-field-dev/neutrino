@@ -165,7 +165,7 @@ async fn add_user_to_creators_group(user_id: &str, v: &Valence) {
         .relate_to_member_record(
             principal.id().expect("principal id"),
             v,
-            valence::use_!(r#"When this vault host **adds a user to the secret creators group**, we **write the member edge** so they can create Neutrino secrets in the demo. The host uses that membership for the bootstrap session."#),
+            valence::use_!(r"When this vault host **adds a user to the secret creators group**, we **write the member edge** so they can create Neutrino secrets in the demo. The host uses that membership for the bootstrap session."),
         )
         .await
         .expect("relate member");

@@ -30,7 +30,7 @@ pub async fn ensure_master_key_meta(valence: &Valence, provenance: &MasterKeyPro
             return;
         }
     };
-    if let Err(e) = NeutrinoMasterKeyMeta::upsert_used(
+    if let Err(e) = NeutrinoMasterKeyMeta::upsert(
         META_ID,
         row,
         valence,
