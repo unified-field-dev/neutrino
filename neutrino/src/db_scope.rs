@@ -11,10 +11,7 @@ pub fn is_db_scoped_creds_path(scope_path: &str) -> bool {
         return false;
     }
     let parts: Vec<&str> = p.split('/').filter(|s| !s.is_empty()).collect();
-    parts.len() >= 5
-        && parts[0] == "nucleus"
-        && parts[1] == "cells"
-        && parts[3] == "scoped_creds"
+    parts.len() >= 5 && parts[0] == "nucleus" && parts[1] == "cells" && parts[3] == "scoped_creds"
 }
 
 #[cfg(test)]

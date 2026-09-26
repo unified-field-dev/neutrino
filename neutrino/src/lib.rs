@@ -79,8 +79,9 @@
 //!   [Get started](#lease-secret).
 //!
 //! Product vault HTTP-facing helpers live in [`vault`]; per-secret Gauge checks use
-//! [`actor_can_secret`]. Low-level seal/unseal is in [`crypto`]. Backend selection uses
-//! [`secret_backend`]; env key classification uses [`bootstrap_trust`].
+//! [`actor_can_secret`]. Low-level seal/unseal is in [`crypto`]. Backend kind selection uses
+//! [`secret_backend`] (Valence sealed store by default; cloud/external kinds fail closed);
+//! env key classification uses [`bootstrap_trust`].
 //!
 //! ## Getting started
 //!
@@ -398,8 +399,9 @@
 //! ```
 //!
 //! Archived-only versions and missing ids return [`NeutrinoError::InvalidState`] /
-//! [`NeutrinoError::NotFound`]. Next: Gluon DB-cred apply after Photon
-//! `neutrino.secret.rotated`, or [reveal](#reveal-secret) for interactive UI.
+//! [`NeutrinoError::NotFound`]. After a DB-scoped vault rotate, the product app publishes
+//! Photon `neutrino.secret.rotated` so Gluon can lease and Deploy updated credentials.
+//! Interactive UI continues at [reveal](#reveal-secret).
 //!
 //! ## Delete secret
 //!
@@ -534,7 +536,7 @@
 //!
 //! | Flag | What it enables |
 //! |------|-----------------|
-//! | *(default)* | Crypto helpers, [`key_source`], [`bootstrap_trust`], [`secret_backend`] stubs |
+//! | *(default)* | Crypto helpers, [`key_source`], [`bootstrap_trust`], [`secret_backend`] kind selector (Valence sealed store default; cloud kinds unsupported) |
 //! | `ssr` | Valence models, [`ValenceSealedStore`], [`vault`], Gauge wiring, instrumentation |
 //! | `rbac-tests` | Extra Gauge RBAC integration tests (`ssr` + lepton/gauge graph) |
 //! | `kms-aws` | AWS KMS [`KeySource`] unwrap (`AwsKmsKeySource`) |
@@ -575,6 +577,7 @@
 
 #[cfg(feature = "ssr")]
 mod canonical_secret_id;
+pub mod db_scope;
 #[cfg(feature = "ssr")]
 pub mod embedded_surreal;
 /// Generated Valence models (schema codegen). Prefer [`vault`] / [`sealed_store`] APIs.
@@ -587,6 +590,8 @@ pub mod instrumentation;
 mod master_key_meta;
 #[cfg(feature = "ssr")]
 mod privacy_policies;
+#[cfg(feature = "photon")]
+pub mod rotation_event;
 #[cfg(feature = "ssr")]
 mod schemas;
 #[cfg(feature = "ssr")]
@@ -597,9 +602,6 @@ pub mod scripts;
 pub mod sealed_store;
 #[cfg(feature = "ssr")]
 pub mod vault;
-pub mod db_scope;
-#[cfg(feature = "photon")]
-pub mod rotation_event;
 #[cfg(feature = "ssr")]
 pub(crate) mod vault_gauge;
 
@@ -626,24 +628,25 @@ pub use bootstrap_seeder::{
     SeededBootstrapSecrets,
 };
 pub use bootstrap_trust::{classify_env_key, SecretLifecycleClass};
+pub use db_scope::is_db_scoped_creds_path;
 pub use error::{NeutrinoError, NeutrinoResult};
 pub use key_source::{
     clear_master_key_cache, master_key_from_env, resolve_master_key, EnvKeySource, HsmBackend,
     KeySource, KeySourceKind, MasterKeyError, MasterKeyProvenance, ResolvedMasterKey,
     WrappedKeyDecryptor,
 };
-#[cfg(feature = "ssr")]
-pub use scope_prefix::scope_path_matches_prefix;
-pub use db_scope::is_db_scoped_creds_path;
 #[cfg(feature = "photon")]
 pub use rotation_event::{
     publish_if_db_scoped_secret_rotated, publish_neutrino_secret_rotated,
     publish_neutrino_secret_rotated_with_scope, NeutrinoSecretRotated,
 };
 #[cfg(feature = "ssr")]
+pub use scope_prefix::scope_path_matches_prefix;
+#[cfg(feature = "ssr")]
 pub use sealed_store::{list_secrets, ListedSecret, ValenceSealedStore};
 pub use secret_backend::{
-    secret_backend_kind_from_env, uses_neutrino_sealed_store, SecretBackendKind,
+    ensure_secret_backend_supported, secret_backend_kind_from_env, uses_neutrino_sealed_store,
+    SecretBackendKind,
 };
 pub use secret_store::{SecretId, SecretRef, SecretVersionId};
 #[cfg(feature = "ssr")]
