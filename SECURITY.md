@@ -38,7 +38,8 @@ grants on the store's request actor (`actor_can_secret` / Valence privacy):
 - Super User (`super_user_group`) as unconditional break-glass
 
 Ordinary `SecretsReveal` holders without a per-secret Reveal grant are **denied**
-(fail closed). The ACL manage page remains a placeholder for fine-grained editing.
+(fail closed). Operators manage fine-grained grants on `/secrets/acl`
+(`AclManagePage`: list, grant, and revoke per-secret Gauge actions).
 
 `put_or_reuse` on an existing `name`+`scope_path` requires Edit (Gauge) before
 decrypt/rotate — `CreateNeutrinoSecrets` alone does not authorize overwriting

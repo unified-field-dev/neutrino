@@ -46,8 +46,8 @@ pub const NEUTRINO_SECRET: ResourceKindDescriptor = ResourceKindDescriptor {
 /// Coarse create gate for secrets.
 ///
 /// `rule_name` keeps the `gauge::` namespace it had when Gauge owned this const, since
-/// Valence privacy rule names are matched by string. Neutrino's own schemas wire
-/// [`crate::privacy_policies::CREATE_NEUTRINO_SECRETS_GATE`] instead, which checks the
+/// Valence privacy rule names are matched by string. Neutrino's own schemas use
+/// `privacy_policies::CREATE_NEUTRINO_SECRETS_GATE` instead, which checks the
 /// same permission name through raw Gauge walks.
 pub const CREATE_NEUTRINO_SECRETS: StaticPermissionGate = StaticPermissionGate {
     rule_name: "gauge::CREATE_NEUTRINO_SECRETS",

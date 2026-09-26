@@ -107,9 +107,7 @@ async fn lease_archived_sad() -> anyhow::Result<()> {
         request_actor: None,
     };
     let cref = store.put(put_req(b"v1")).await?;
-    let _ = store
-        .rotate(&cref.id, b"v2".to_vec(), "test-actor")
-        .await?;
+    let _ = store.rotate(&cref.id, b"v2".to_vec(), "test-actor").await?;
     // Force prior version archived (rotate leaves grace; apply success path would archive).
     let secret_rid = RecordId::new("neutrino_secret", cref.id.0.as_str());
     let rows = NeutrinoSecretVersion::query_used(
@@ -212,9 +210,7 @@ async fn extend_grace_status_happy() -> anyhow::Result<()> {
         .await
         .map_err(|e| anyhow::anyhow!(e.to_string()))?;
 
-    store
-        .extend_grace(&cref.id, 86400, "test-actor")
-        .await?;
+    store.extend_grace(&cref.id, 86400, "test-actor").await?;
 
     let lease = store
         .lease(LeaseRequest {

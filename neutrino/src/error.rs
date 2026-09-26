@@ -47,9 +47,9 @@ pub enum NeutrinoError {
         /// Source error.
         source: anyhow::Error,
     },
-    /// Trait default or backend that does not implement an operation.
+    /// Operation or backend kind that is not supported in this deployment.
     Unsupported {
-        /// Operation label (e.g. `delete`, `rotate`).
+        /// Operation or selector label (e.g. `delete`, `NEUTRINO_SECRET_BACKEND=cloud|…`).
         operation: &'static str,
     },
     /// Underlying Valence, Gauge, audit, or other service failure.
@@ -80,10 +80,7 @@ impl fmt::Display for NeutrinoError {
                 write!(f, "crypto {operation} failed: {source}")
             }
             Self::Unsupported { operation } => {
-                write!(
-                    f,
-                    "SecretStore::{operation} is not implemented for this backend"
-                )
+                write!(f, "{operation} is not supported")
             }
             Self::Service { operation, source } => {
                 write!(f, "neutrino {operation} failed: {source}")
